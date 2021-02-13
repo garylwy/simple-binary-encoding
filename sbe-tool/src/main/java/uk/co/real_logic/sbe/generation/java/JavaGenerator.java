@@ -263,6 +263,8 @@ public class JavaGenerator implements CodeGenerator
         final String indent,
         final boolean isSubGroup) throws IOException
     {
+        final List<String> groupNames = new ArrayList<>();
+
         for (int i = 0, size = tokens.size(); i < size; i++)
         {
             final Token groupToken = tokens.get(i);
@@ -273,6 +275,7 @@ public class JavaGenerator implements CodeGenerator
 
             final int index = i;
             final String groupName = decoderName(formatClassName(groupToken.name()));
+            groupNames.add(groupToken.name());
 
             ++i;
             final int groupHeaderTokenCount = tokens.get(i).componentTokenCount();
@@ -304,6 +307,66 @@ public class JavaGenerator implements CodeGenerator
 
             sb.append(indent).append("    }\n");
         }
+
+        generateSkipAllGroup(sb, indent, groupNames);
+        generateSkipToEnd(sb, indent, isSubGroup);
+        if (isSubGroup)
+        {
+            generateGroupSkipAll(sb, indent);
+        }
+    }
+
+    private void generateSkipAllGroup(
+        final StringBuilder sb,
+        final String baseIndent,
+        final List<String> groupNames)
+    {
+        final String indent = baseIndent + INDENT;
+        sb.append('\n');
+        append(sb, indent, "public int skipAllGroup()");
+        append(sb, indent, "{");
+        append(sb, indent, "    int size = 0;");
+        for (final String groupName : groupNames)
+        {
+            append(sb, indent, "    size += " + formatPropertyName(groupName) + "().skipAll();");
+        }
+        append(sb, indent, "    return size;");
+        append(sb, indent, "}");
+    }
+
+    private void generateSkipToEnd(
+        final StringBuilder sb,
+        final String baseIndent,
+        final boolean isSubGroup)
+    {
+        final String indent = baseIndent + INDENT;
+        sb.append('\n');
+        append(sb, indent, "public int skipToEnd()");
+        append(sb, indent, "{");
+        append(sb, indent, "    " +
+            (isSubGroup ? "parentMessage.limit(offset + blockLength);" : "limit(offset + actingBlockLength);")
+        );
+        append(sb, indent, "    return skipAllGroup() + skipAllVarData();");
+        append(sb, indent, "}");
+    }
+
+    private void generateGroupSkipAll(
+        final StringBuilder sb,
+        final String baseIndent)
+    {
+        final String indent = baseIndent + INDENT;
+        sb.append('\n');
+        append(sb, indent, "public int skipAll()");
+        append(sb, indent, "{");
+        append(sb, indent, "    int size = 0;");
+        append(sb, indent, "    parentMessage.limit(initialLimit);");
+        append(sb, indent, "    index = 0;");
+        append(sb, indent, "    while (index < count)");
+        append(sb, indent, "    {");
+        append(sb, indent, "        size += next().skipToEnd();");
+        append(sb, indent, "    }");
+        append(sb, indent, "    return size;");
+        append(sb, indent, "}");
     }
 
     private void generateEncoderGroups(
@@ -400,7 +463,8 @@ public class JavaGenerator implements CodeGenerator
             .append(indent).append("        }\n\n")
             .append(indent).append("        index = 0;\n")
             .append(indent).append("        final int limit = parentMessage.limit();\n")
-            .append(indent).append("        parentMessage.limit(limit + HEADER_SIZE);\n")
+            .append(indent).append("        initialLimit = limit + HEADER_SIZE;\n")
+            .append(indent).append("        parentMessage.limit(initialLimit);\n")
             .append(indent).append("        blockLength = ").append(blockLenCast).append(blockLengthGet).append(";\n")
             .append(indent).append("        count = ").append(numInGroupCast).append(numInGroupGet).append(";\n")
             .append(indent).append("    }\n");
@@ -593,6 +657,7 @@ public class JavaGenerator implements CodeGenerator
             indent + "    public static final int HEADER_SIZE = %2$d;\n" +
             indent + "    private final %3$s parentMessage;\n" +
             indent + "    private %4$s buffer;\n" +
+            indent + "    private int initialLimit;\n" +
             indent + "    private int count;\n" +
             indent + "    private int index;\n" +
             indent + "    private int offset;\n" +
@@ -777,6 +842,8 @@ public class JavaGenerator implements CodeGenerator
     private void generateDecoderVarData(
         final StringBuilder sb, final List<Token> tokens, final String indent)
     {
+        final List<String> propertyNames = new ArrayList<>();
+
         for (int i = 0, size = tokens.size(); i < size;)
         {
             final Token token = tokens.get(i);
@@ -818,8 +885,21 @@ public class JavaGenerator implements CodeGenerator
             generateDataDecodeMethods(
                 sb, token, propertyName, sizeOfLengthField, lengthType, byteOrderStr, characterEncoding, indent);
 
+            propertyNames.add(propertyName);
             i += token.componentTokenCount();
         }
+
+        sb.append("\n");
+        final String finalIndent = indent + INDENT;
+        append(sb, finalIndent, "private int skipAllVarData()");
+        append(sb, finalIndent, "{");
+        append(sb, finalIndent, "    int size = 0;");
+        for (final String propertyName : propertyNames)
+        {
+            append(sb, finalIndent, "    size += skip" + Generators.toUpperFirstChar(propertyName) + "();");
+        }
+        append(sb, finalIndent, "    return size;");
+        append(sb, finalIndent, "}");
     }
 
     private void generateEncoderVarData(
